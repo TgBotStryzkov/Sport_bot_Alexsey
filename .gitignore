@@ -1,0 +1,14 @@
+# Секреты
+.env
+
+# Данные пользователей
+/users/*.json
+
+# Кэш Python
+__pycache__/
+*.pyc
+
+# IDE и прочий мусор
+.vscode/
+.idea/
+*.log

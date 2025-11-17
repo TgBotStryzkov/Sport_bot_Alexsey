@@ -1,10 +1,12 @@
 import logging
 import warnings
+import time
 warnings.filterwarnings("ignore", message=r"If 'per_message' is set", category=UserWarning)
 
 
 from telegram import Update
 from telegram.ext import ApplicationBuilder, ContextTypes
+from telegram.request import HTTPXRequest
 
 from config import TOKEN
 from functions.base import register_base_commands
@@ -69,19 +71,46 @@ async def error_handler(update: object, context: ContextTypes.DEFAULT_TYPE) -> N
 
 
 def main():
-    if not TOKEN:
-        raise RuntimeError("BOT_TOKEN пуст. Укажи его в .env как BOT_TOKEN=...")
-    
-    app = ApplicationBuilder().token(TOKEN).build()
+    while True:
+        try:
+            # 👇 создаём HTTPXRequest с увеличенными таймаутами
+            request = HTTPXRequest(
+                connect_timeout=10.0,  # время на установление соединения
+                read_timeout=30.0,     # ждём ответа от Telegram
+                write_timeout=30.0,    # даём время на отправку фото/файлов
+                pool_timeout=10.0      # ожидание свободного соединения
+            )
 
-    app.add_error_handler(error_handler)  # ✅ Регистрируем обработчик ошибок
+            # 👇 передаём request в ApplicationBuilder
+            app = (
+                ApplicationBuilder()
+                .token(TOKEN)
+                .request(request)
+                .build()
+            )
 
-    register_base_commands(app)
-    register_notify_handlers(app)
-    register_training_handlers(app)
+            app.add_error_handler(error_handler)
 
-    print("✅ Бот запущен")
-    app.run_polling()
+            register_base_commands(app)
+            register_notify_handlers(app)
+            register_training_handlers(app)
+
+            print("✅ Бот запущен")
+            app.run_polling(close_loop=False)
+
+            # Если polling завершился без исключения (ты сам его остановил) — выходим из цикла
+            print("run_polling завершился без ошибок, выходим из main()")
+            break
+
+        except Exception as e:
+            logging.exception("Критическая ошибка в main()/run_polling: %s", e)
+            print("Перезапуск бота через 5 секунд...")
+            time.sleep(5)
 
 if __name__ == "__main__":
-    main()
+    try:
+        main()
+    except Exception as e:
+        logging.exception("Неперехваченная ошибка на самом верхнем уровне: %s", e)
+        # сюда ничего особо не добавляем, пусть процесс упадёт, а systemd/докер его перезапустит
+

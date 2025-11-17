@@ -7,15 +7,21 @@ import matplotlib.pyplot as plt
 import io
 import re
 from utils.data import load_user_data, write_user_data, get_progress_bar, разобрать_результат
+import logging
 
 
 
 
 # Показывает карточку пользователя с прогрессом
 async def show_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        logging.error("show_card вызван без update.message")
+        return
+
     user_id = str(update.message.from_user.id)
     today = datetime.now().strftime("%Y-%m-%d")
     data = load_user_data(user_id)
+
     # Если данных за сегодня нет или они пустые — ищем последнюю заполненную дату
     entry = data.get(today, {})
     if not any(entry.values()):
@@ -62,7 +68,9 @@ async def show_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
                 percent_weight = round((1 - weight_diff / start_diff) * 100)
                 percent_weight = min(max(percent_weight, 0), 100)
                 weight_prog = f"Вес: {get_progress_bar(percent_weight)} {percent_weight}%"
-    except:
+
+    except Exception as e:
+        logging.exception("Ошибка при расчёте прогресса по весу: %s", e)
         weight_prog = "Вес: ❌ ошибка"
 
     # Прогресс по шагам
@@ -70,7 +78,9 @@ async def show_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if steps and desired_steps:
             percent_steps = round(int(steps) / int(desired_steps) * 100)
             steps_prog = f"Шаги: {get_progress_bar(percent_steps)} {percent_steps}%"
-    except:
+
+    except Exception as e:
+        logging.exception("Ошибка при расчёте прогресса по шагам: %s", e)
         steps_prog = "Шаги: ❌ ошибка"
 
     # Прогресс по сну
@@ -81,7 +91,9 @@ async def show_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
             percent_sleep = round(s_cur / s_goal * 100)
             percent_sleep = min(percent_sleep, 100)
             sleep_prog = f"Сон: {get_progress_bar(percent_sleep)} {percent_sleep}%"
-    except:
+
+    except Exception as e:
+        logging.exception("Ошибка при расчёте прогресса по сну: %s", e)
         sleep_prog = "Сон: ❌ ошибка"
 
     # Прогресс по калориям
@@ -89,9 +101,10 @@ async def show_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if calories is not None and desired_calories:
             percent_calories = round(int(calories) / int(desired_calories) * 100)
             calories_prog = f"Калории: {get_progress_bar(percent_calories)} {percent_calories}%"
-    except:
-        calories_prog = "Калории: ❌ ошибка"
 
+    except Exception as e:
+        logging.exception("Ошибка при расчёте прогресса по калориям: %s", e)
+        calories_prog = "Калории: ❌ ошибка"
 
 
     # Собираем карточку
@@ -167,12 +180,25 @@ async def plot_weight_graph(update: Update, context: ContextTypes.DEFAULT_TYPE):
     plt.savefig(buffer, format='png')
     buffer.seek(0)
 
-    await update.message.reply_photo(photo=buffer)
-    buffer.close()
+    try:
+        if update.message:
+            await update.message.reply_photo(photo=buffer)
+        elif update.callback_query and update.callback_query.message:
+            # На всякий случай, если вызов был из callback
+            await update.callback_query.message.reply_photo(photo=buffer)
+        else:
+            logging.error("plot_weight_graph: нет message или callback_query.message для отправки фото")
+    finally:
+        buffer.close()
+        plt.close()
 
 
 # Показывает статистику пользователя
 async def show_statistics(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        logging.error("show_statistics вызван без update.message")
+        return
+
     user_id = str(update.message.from_user.id)
     data = load_user_data(user_id)
     тренировки = 0
@@ -185,7 +211,8 @@ async def show_statistics(update: Update, context: ContextTypes.DEFAULT_TYPE):
             тренировки += 1
             try:
                 даты_с_тренировками.append(datetime.strptime(дата, "%d.%m.%Y").date())
-            except:
+            except Exception as e:
+                logging.exception("Ошибка при разборе даты тренировки %s: %s", дата, e)
                 continue
 
     даты_с_тренировками = sorted(set(даты_с_тренировками), reverse=True)
@@ -213,11 +240,29 @@ async def show_statistics(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if not isinstance(упражнения, dict):
             continue
 
+
+
         for название, результат in упражнения.items():
-            _, _, вес = разобрать_результат(результат)
+            try:
+                _, _, вес = разобрать_результат(результат)
+            except Exception as e:
+                logging.exception("Ошибка при разборе результата упражнения '%s': %s", название, e)
+                continue
+
             if вес is not None:
-                if название not in лучшие or вес > разобрать_результат(лучшие[название])[2]:
-                    лучшие[название] = результат
+                try:
+                    # сравнение с уже сохранённым лучшим результатом
+                    if (
+                        название not in лучшие
+                        or вес > разобрать_результат(лучшие[название])[2]
+                    ):
+                        лучшие[название] = результат
+                except Exception as e:
+                    logging.exception(
+                        "Ошибка при сравнении результатов упражнения '%s': %s",
+                        название,
+                        e,
+                    )
 
     сообщение = (
         f"📈 Общее количество тренировок: {тренировки}\n"
@@ -236,29 +281,45 @@ async def show_statistics(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def start_goals_edit(query, context):
     """Запускает пошаговый ввод целей."""
+    import logging
+    
     user_id = str(query.from_user.id)
     data = load_user_data(user_id)
     goals = data.get("цели", {})
 
-    # Сохраняем текущие цели как временные
-    context.user_data["goals_state"] = True
-    context.user_data["goals_step"] = 1
-    context.user_data["goals_tmp"] = {
-        "желаемый вес": goals.get("желаемый вес"),
-        "желаемые шаги": goals.get("желаемые шаги"),
-        "желаемый сон": goals.get("желаемый сон"),
-        "желаемые калории": goals.get("желаемые калории"),
-        "стартовый вес": goals.get("стартовый вес"),
-    }
+    try:
+        if not query or not query.message:
+            logging.error("start_goals_edit вызван без query или query.message")
+            return
 
-    text = (
-        "🎯 Обновим твои цели.\n"
-        "Отвечай только цифрами.\n"
-        "Если хочешь оставить старое значение — напиши «-».\n\n"
-        "1/5. Введи желаемый вес в кг.\n"
-        f"Сейчас: {goals.get('желаемый вес', 'не задано')}"
-    )
-    await query.message.reply_text(text)
+        # Сохраняем текущие цели как временные
+        context.user_data["goals_state"] = True
+        context.user_data["goals_step"] = 1
+        context.user_data["goals_tmp"] = {
+            "желаемый вес": goals.get("желаемый вес"),
+            "желаемые шаги": goals.get("желаемые шаги"),
+            "желаемый сон": goals.get("желаемый сон"),
+            "желаемые калории": goals.get("желаемые калории"),
+            "стартовый вес": goals.get("стартовый вес"),
+        }
+
+        text = (
+            "🎯 Обновим твои цели.\n"
+            "Отвечай только цифрами.\n"
+            "Если хочешь оставить старое значение — напиши «-».\n\n"
+            "1/5. Введи желаемый вес в кг.\n"
+            f"Сейчас: {goals.get('желаемый вес', 'не задано')}"
+        )
+        await query.message.reply_text(text)
+
+    except Exception as e:
+        logging.exception("Ошибка в start_goals_edit: %s", e)
+        try:
+            await query.message.reply_text(
+                "⚠️ Не удалось запустить изменение целей. Попробуй ещё раз позже."
+            )
+        except Exception:
+            pass
 
 
 def _extract_number(text: str):
@@ -275,117 +336,154 @@ def _extract_number(text: str):
 
 async def handle_goals_input(update, context):
     """Обрабатывает ввод пользователя на каждом шаге мастера целей."""
-    text = update.message.text.strip()
-    step = context.user_data.get("goals_step", 1)
-    tmp = context.user_data.get("goals_tmp", {})
+    import logging
 
-    async def ask_again(message: str):
-        await update.message.reply_text(message)
+    try:
+        if not update.message:
+            logging.error("handle_goals_input вызван без update.message")
+            return
+        
+        text = update.message.text.strip()
+        step = context.user_data.get("goals_step", 1)
+        tmp = context.user_data.get("goals_tmp", {})
 
-    # Шаг 1 — желаемый вес
-    if step == 1:
-        if text != "-":
-            value = _extract_number(text)
-            if value is None:
-                await ask_again("Нужна только цифра, например: 70\nПопробуй ещё раз — желаемый вес (кг):")
-                return
-            tmp["желаемый вес"] = value
-        context.user_data["goals_step"] = 2
-        await update.message.reply_text(
-            "2/5. Введи цель по шагам в день.\n"
-            f"Сейчас: {tmp.get('желаемые шаги', 'не задано')}\n"
-            "Если хочешь оставить как есть — напиши «-»."
-        )
-        return
+        async def ask_again(message: str):
+            await update.message.reply_text(message)
 
-    # Шаг 2 — шаги
-    if step == 2:
-        if text != "-":
-            value = _extract_number(text)
-            if value is None:
-                await ask_again("Нужна только цифра, например: 10000\nПопробуй ещё раз — цель по шагам в день:")
-                return
-            tmp["желаемые шаги"] = value
-        context.user_data["goals_step"] = 3
-        await update.message.reply_text(
-            "3/5. Сколько часов сна хочешь в день?\n"
-            f"Сейчас: {tmp.get('желаемый сон', 'не задано')}\n"
-            "Если хочешь оставить как есть — напиши «-»."
-        )
-        return
+        # Шаг 1 — желаемый вес
+        if step == 1:
+            if text != "-":
+                value = _extract_number(text)
+                if value is None:
+                    await ask_again("Нужна только цифра, например: 70\nПопробуй ещё раз — желаемый вес (кг):")
+                    return
+                tmp["желаемый вес"] = value
+            context.user_data["goals_step"] = 2
+            await update.message.reply_text(
+                "2/5. Введи цель по шагам в день.\n"
+                f"Сейчас: {tmp.get('желаемые шаги', 'не задано')}\n"
+                "Если хочешь оставить как есть — напиши «-»."
+            )
+            return
 
-    # Шаг 3 — сон
-    if step == 3:
-        if text != "-":
-            value = _extract_number(text)
-            if value is None:
-                await ask_again("Нужна только цифра, например: 8\nПопробуй ещё раз — цель по сну (часы):")
-                return
-            tmp["желаемый сон"] = value
-        context.user_data["goals_step"] = 4
-        await update.message.reply_text(
-            "4/5. Цель по калориям в день.\n"
-            f"Сейчас: {tmp.get('желаемые калории', 'не задано')}\n"
-            "Если хочешь оставить как есть — напиши «-»."
-        )
-        return
+        # Шаг 2 — шаги
+        if step == 2:
+            if text != "-":
+                value = _extract_number(text)
+                if value is None:
+                    await ask_again("Нужна только цифра, например: 10000\nПопробуй ещё раз — цель по шагам в день:")
+                    return
+                tmp["желаемые шаги"] = value
+            context.user_data["goals_step"] = 3
+            await update.message.reply_text(
+                "3/5. Сколько часов сна хочешь в день?\n"
+                f"Сейчас: {tmp.get('желаемый сон', 'не задано')}\n"
+                "Если хочешь оставить как есть — напиши «-»."
+            )
+            return
 
-    # Шаг 4 — калории
-    if step == 4:
-        if text != "-":
-            value = _extract_number(text)
-            if value is None:
-                await ask_again("Нужна только цифра, например: 2500\nПопробуй ещё раз — цель по калориям в день:")
-                return
-            tmp["желаемые калории"] = value
-        context.user_data["goals_step"] = 5
-        await update.message.reply_text(
-            "5/5. Стартовый вес (для прогресса).\n"
-            f"Сейчас: {tmp.get('стартовый вес', 'не задано')}\n"
-            "Если хочешь оставить как есть — напиши «-»."
-        )
-        return
+        # Шаг 3 — сон
+        if step == 3:
+            if text != "-":
+                value = _extract_number(text)
+                if value is None:
+                    await ask_again("Нужна только цифра, например: 8\nПопробуй ещё раз — цель по сну (часы):")
+                    return
+                tmp["желаемый сон"] = value
+            context.user_data["goals_step"] = 4
+            await update.message.reply_text(
+                "4/5. Цель по калориям в день.\n"
+                f"Сейчас: {tmp.get('желаемые калории', 'не задано')}\n"
+                "Если хочешь оставить как есть — напиши «-»."
+            )
+            return
 
-    # Шаг 5 — стартовый вес
-    if step == 5:
-        if text != "-":
-            value = _extract_number(text)
-            if value is None:
-                await ask_again("Нужна только цифра, например: 75\nПопробуй ещё раз — стартовый вес (кг):")
-                return
-            tmp["стартовый вес"] = value
+        # Шаг 4 — калории
+        if step == 4:
+            if text != "-":
+                value = _extract_number(text)
+                if value is None:
+                    await ask_again("Нужна только цифра, например: 2500\nПопробуй ещё раз — цель по калориям в день:")
+                    return
+                tmp["желаемые калории"] = value
+            context.user_data["goals_step"] = 5
+            await update.message.reply_text(
+                "5/5. Стартовый вес (для прогресса).\n"
+                f"Сейчас: {tmp.get('стартовый вес', 'не задано')}\n"
+                "Если хочешь оставить как есть — напиши «-»."
+            )
+            return
 
-        # Сохраняем цели в JSON
-        user_id = str(update.message.from_user.id)
-        data = load_user_data(user_id)
-        data["цели"] = tmp
-        write_user_data(user_id, data)
+        # Шаг 5 — стартовый вес
+        if step == 5:
+            if text != "-":
+                value = _extract_number(text)
+                if value is None:
+                    await ask_again("Нужна только цифра, например: 75\nПопробуй ещё раз — стартовый вес (кг):")
+                    return
+                tmp["стартовый вес"] = value
 
-        # Чистим состояние
+            # Сохраняем цели в JSON
+            user_id = str(update.message.from_user.id)
+            data = load_user_data(user_id)
+            data["цели"] = tmp
+            write_user_data(user_id, data)
+
+            # Чистим состояние
+            context.user_data.pop("goals_state", None)
+            context.user_data.pop("goals_step", None)
+            context.user_data.pop("goals_tmp", None)
+
+            await update.message.reply_text("✅ Цели сохранены! Можешь снова открыть карточку, чтобы посмотреть прогресс.")
+            return
+        
+    except Exception as e:
+        logging.exception("Ошибка в handle_goals_input: %s", e)
+        try:
+            await update.message.reply_text(
+                "⚠️ Что-то пошло не так при изменении целей. Попробуй позже."
+            )
+        except Exception:
+            pass
+        # На всякий пожарный сбросим состояние мастера
         context.user_data.pop("goals_state", None)
         context.user_data.pop("goals_step", None)
         context.user_data.pop("goals_tmp", None)
-
-        await update.message.reply_text("✅ Цели сохранены! Можешь снова открыть карточку, чтобы посмотреть прогресс.")
-        return
+    
+    
 
 
 # Редактирует карточку пользователя
 async def edit_card_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    import logging
+
     query = update.callback_query
-    await query.answer()
-
-    # Кнопка "Цели" — запускаем мастер ввода целей
-    if query.data == "edit_goals":
-        await start_goals_edit(query, context)
+    if not query:
+        logging.error("edit_card_callback вызван без callback_query")
         return
+    try:
+        await query.answer()
 
-    # Остальные кнопки — обычное редактирование полей за сегодня
-    context.user_data["state"] = "card_edit"
-    await query.message.reply_text(
-        "Выбери, что хочешь изменить:",
-        reply_markup=get_edit_card_keyboard()
-    )
+        # Кнопка "Цели" — запускаем мастер ввода целей
+        if query.data == "edit_goals":
+            await start_goals_edit(query, context)
+            return
+
+        # Остальные кнопки — обычное редактирование полей за сегодня
+        context.user_data["state"] = "card_edit"
+        await query.message.reply_text(
+            "Выбери, что хочешь изменить:",
+            reply_markup=get_edit_card_keyboard()
+        )
+
+    except Exception as e:
+        logging.exception("Ошибка в edit_card_callback: %s", e)
+        try:
+            await query.message.reply_text(
+                "⚠️ Не удалось открыть меню редактирования. Попробуй ещё раз."
+            )
+        except Exception:
+            pass
 
 # ---------------- Универсальное редактирование полей карточки ----------------
 
@@ -435,28 +533,57 @@ async def edit_field_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
 
 # Запрашивает у пользователя новое описание тренировки
 async def edit_workout_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    import logging
+
     query = update.callback_query
-    await query.answer()
-    context.user_data["editing_field"] = "тренировка"
-    await query.edit_message_text("Введите описание новой тренировки:")
+    if not query:
+        logging.error("edit_workout_callback вызван без callback_query")
+        return
+
+    try:
+        await query.answer()
+        context.user_data["editing_field"] = "тренировка"
+        await query.edit_message_text("Введите описание новой тренировки:")
+    except Exception as e:
+        logging.exception("Ошибка в edit_workout_callback: %s", e)
+        try:
+            await query.message.reply_text(
+                "⚠️ Не удалось начать редактирование тренировки. Попробуй ещё раз."
+            )
+        except Exception:
+            pass
+
 
 
 # Сохраняет новое значение для выбранного поля
 async def save_new_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not update.message:
+        logging.error("save_new_value вызван без update.message")
+        return
+
     user_id = str(update.message.from_user.id)
     new_value = update.message.text
     editing_field = context.user_data.get("editing_field")
+
     if editing_field:
-        # Загружаем JSON
-        data = load_user_data(user_id)
-        today = str(date.today())
-        if today not in data:
-            data[today] = {}
-        data[today][editing_field] = new_value
-        write_user_data(user_id, data)
-        if update.message:
-            await update.message.reply_text(f"✅ Значение поля '{editing_field}' обновлено!")
-        context.user_data.pop("editing_field")
+        try:
+            data = load_user_data(user_id)
+            today = str(date.today())
+            if today not in data:
+                data[today] = {}
+            data[today][editing_field] = new_value
+            write_user_data(user_id, data)
+            await update.message.reply_text(
+                f"✅ Значение поля '{editing_field}' обновлено!"
+            )
+        except Exception as e:
+            logging.exception("Ошибка при сохранении нового значения '%s': %s", editing_field, e)
+            await update.message.reply_text(
+                "⚠️ Не удалось сохранить новое значение. Попробуй позже."
+            )
+        finally:
+            context.user_data.pop("editing_field", None)
+
     else:
         if update.message:
             await update.message.reply_text("⚠️ Не выбрано, что изменить.")
@@ -466,8 +593,18 @@ async def save_new_value(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # Показывает карту тренировок пользователя
 async def show_workout_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    user_id = str(update.message.from_user.id)
-    data = load_user_data(user_id)
+    if not update.message:
+        logging.error("show_workout_card вызван без update.message")
+        return
+
+    try:
+        user_id = str(update.message.from_user.id)
+        data = load_user_data(user_id)
+    except Exception as e:
+        logging.exception("Ошибка при загрузке данных для show_workout_card: %s", e)
+        await update.message.reply_text("⚠️ Не удалось загрузить тренировки.")
+        return
+
 
     dates = sorted(data.keys(), reverse=True)
     for date in dates:
@@ -512,26 +649,42 @@ async def start_sequential_input(update: Update, context: ContextTypes.DEFAULT_T
 
 
 async def universal_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    state = context.user_data.get("state")
-    text = update.message.text
-    user_id = str(update.message.from_user.id)
+    import logging
 
-    # --- Мастер изменения целей ---
-    if context.user_data.get("goals_state"):
-        return await handle_goals_input(update, context)
+    if not update.message:
+        logging.error("universal_handler вызван без update.message")
+        return
+    
+    try:
+        state = context.user_data.get("state")
+        text = update.message.text
+        user_id = str(update.message.from_user.id)
 
-    # --- Обработка редактирования карточки ---
-    if state == "card_edit":
-        return await save_new_value(update, context)
+        # --- Мастер изменения целей ---
+        if context.user_data.get("goals_state"):
+            return await handle_goals_input(update, context)
 
-    # --- Обработка результата упражнения ---
-    elif state == "exercise_result":
-        return await сохранить_результат_упражнения(update, context)
+        # --- Обработка редактирования карточки ---
+        if state == "card_edit":
+            return await save_new_value(update, context)
 
-    # --- Ввод количества повторений ---
-    elif state == "count_input":
-        return await receive_exercise_count(update, context)
+        # --- Обработка результата упражнения ---
+        elif state == "exercise_result":
+            return await сохранить_результат_упражнения(update, context)
 
-    # --- Неопознанное состояние ---
-    else:
-        await update.message.reply_text("Пожалуйста, выбери действие через кнопки.")
+        # --- Ввод количества повторений ---
+        elif state == "count_input":
+            return await receive_exercise_count(update, context)
+
+        # --- Неопознанное состояние ---
+        else:
+            await update.message.reply_text("Пожалуйста, выбери действие через кнопки.")
+
+    except Exception as e:
+        logging.exception("Ошибка в universal_handler: %s", e)
+        try:
+            await update.message.reply_text(
+                "⚠️ При обработке ввода произошла ошибка. Попробуй ещё раз."
+            )
+        except Exception:
+            pass

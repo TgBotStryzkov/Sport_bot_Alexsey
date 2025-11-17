@@ -13,7 +13,6 @@ from functions.send import send_all_user_data
 import json
 import os
 from utils.data import ensure_user_file_exists
-from functions.training.card import show_card
 
 
 # 🧠 Локальные утилиты
@@ -65,7 +64,16 @@ from functions.notify import (
 
 # Сохраняет данные пользователя в JSON-файл
 async def universal_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    await save_user_data(update, context)
+    try:
+        await save_user_data(update, context)
+    except Exception as e:
+        # здесь не падаем, просто логируем
+        import logging
+        logging.exception("Ошибка в universal_handler при сохранении данных пользователя: %s", e)
+        # опционально: можно тихо проигнорировать или сказать юзеру, что что-то не так
+        if update.message:
+            await update.message.reply_text("⚠️ Не удалось сохранить данные, попробуй ещё раз позже.")
+
 
 
 # Ответ пользователю, если он пишет вне логики бота
@@ -173,17 +181,31 @@ async def support_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def edit_goals_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Запуск мастера изменения целей по кнопке '🎯 Цели'."""
-    user_id = str(update.callback_query.from_user.id)
-    username = update.callback_query.from_user.username or "неизвестно"
-    ensure_user_file_exists(user_id, username)
+    import logging
+    try:
+        if not update.callback_query:
+            logging.error("edit_goals_callback вызван без callback_query")
+            return
 
-    query = update.callback_query
-    await query.answer()
+        user_id = str(update.callback_query.from_user.id)
+        username = update.callback_query.from_user.username or "неизвестно"
+        ensure_user_file_exists(user_id, username)
 
-    # Запускаем пошаговый ввод целей
-    await start_goals_edit(query, context)
+        query = update.callback_query
+        await query.answer()
 
+        # Запускаем пошаговый ввод целей
+        await start_goals_edit(query, context)
 
+    except Exception as e:
+        logging.exception("Ошибка в edit_goals_callback: %s", e)
+        # Если можем, отвечаем пользователю, чтобы не висела "часика"
+        if update.callback_query:
+            try:
+                await update.callback_query.message.reply_text("⚠️ Не удалось начать редактирование целей. Попробуй ещё раз позже.")
+            except Exception:
+                pass
+            
 
 # ─── Команда /input ─── #
 async def input_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -201,50 +223,60 @@ async def input_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # Обработка произвольных текстов
 async def route_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    import logging
     print("📥 route_text_handler сработал!")
-    if not update.message:
-        print("⚠️ Нет update.message")
-        return
 
-    user_id = str(update.message.from_user.id)
-    user_name = update.message.from_user.username or "неизвестно"
+    try:
+        if not update.message:
+            print("⚠️ Нет update.message")
+            return
 
-    from utils.data import ensure_user_file_exists
+        user_id = str(update.message.from_user.id)
+        user_name = update.message.from_user.username or "неизвестно"
 
-    ensure_user_file_exists(user_id, user_name)
+        from utils.data import ensure_user_file_exists
 
-    # Если запущен мастер изменения целей — обрабатываем ввод тут
-    if context.user_data.get("goals_state"):
-        await handle_goals_input(update, context)
-        return
+        ensure_user_file_exists(user_id, user_name)
 
-    if "текущая_тренировка" in context.user_data and "текущее_упражнение" in context.user_data:
-        await сохранить_результат_упражнения(update, context)
-        return
+        # Если запущен мастер изменения целей — обрабатываем ввод тут
+        if context.user_data.get("goals_state"):
+            await handle_goals_input(update, context)
+            return
 
-    if context.user_data.get("ожидаем_новое_упражнение"):
-        текст = update.message.text.strip()
-        muscle = context.user_data.get("выбранная_мышца")
-        data = load_user_data(user_id)
-        data.setdefault("доп_упражнения", {})
-        data["доп_упражнения"].setdefault(muscle, []).append(текст)
-        write_user_data(user_id, data)
-        context.user_data.pop("ожидаем_новое_упражнение")
-        await update.message.reply_text(f"✅ Упражнение «{текст}» добавлено в список на {muscle}!")
-        await назад_к_мышцам_callback(update, context)
-        return
+        if "текущая_тренировка" in context.user_data and "текущее_упражнение" in context.user_data:
+            await сохранить_результат_упражнения(update, context)
+            return
 
-    if "editing_field" in context.user_data:
-        await save_new_value(update, context)
-        return
+        if context.user_data.get("ожидаем_новое_упражнение"):
+            текст = update.message.text.strip()
+            muscle = context.user_data.get("выбранная_мышца")
+            data = load_user_data(user_id)
+            data.setdefault("доп_упражнения", {})
+            data["доп_упражнения"].setdefault(muscle, []).append(текст)
+            write_user_data(user_id, data)
+            context.user_data.pop("ожидаем_новое_упражнение")
+            await update.message.reply_text(f"✅ Упражнение «{текст}» добавлено в список на {muscle}!")
+            await назад_к_мышцам_callback(update, context)
+            return
 
-    if ":" in update.message.text:
-        from utils.data import save_user_data
-        await save_user_data(update, context)
-        return
+        if "editing_field" in context.user_data:
+            await save_new_value(update, context)
+            return
 
-    await handle_unknown_message(update, context)
+        if ":" in update.message.text:
+            from utils.data import save_user_data
+            await save_user_data(update, context)
+            return
+
+        await handle_unknown_message(update, context)
+
+    except Exception as e:
+        logging.exception("Ошибка в route_text_handler: %s", e)
+        if update.message:
+            await update.message.reply_text("⚠️ Произошла ошибка при обработке сообщения. Попробуй ещё раз.")
         
+
+
 def register_base_commands(app: Application):
     # Команды
     app.add_handler(CommandHandler("start", start))

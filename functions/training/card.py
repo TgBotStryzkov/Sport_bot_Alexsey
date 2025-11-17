@@ -281,7 +281,10 @@ async def show_statistics(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 async def start_goals_edit(query, context):
     """Запускает пошаговый ввод целей."""
-    import logging
+
+    if not query or not query.message:
+        logging.error("start_goals_edit вызван без query или query.message")
+        return
     
     user_id = str(query.from_user.id)
     data = load_user_data(user_id)
@@ -336,7 +339,10 @@ def _extract_number(text: str):
 
 async def handle_goals_input(update, context):
     """Обрабатывает ввод пользователя на каждом шаге мастера целей."""
-    import logging
+
+    if not update.message:
+        logging.error("handle_goals_input вызван без update.message")
+        return
 
     try:
         if not update.message:
@@ -455,8 +461,6 @@ async def handle_goals_input(update, context):
 
 # Редактирует карточку пользователя
 async def edit_card_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    import logging
-
     query = update.callback_query
     if not query:
         logging.error("edit_card_callback вызван без callback_query")
@@ -509,32 +513,45 @@ FIELD_CONFIG = {
 
 async def edit_field_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
     """Универсальный обработчик для кнопок edit_field:... (вес, шаги, сон, калории)."""
+
     query = update.callback_query
-    await query.answer()
+    if not query:
+        logging.error("edit_field_callback вызван без callback_query")
+        return
 
-    data = query.data  # например: "edit_field:weight"
     try:
-        _, key = data.split(":", 1)
-    except ValueError:
-        await query.message.reply_text("⚠️ Не удалось определить, что нужно изменить.")
-        return
+        await query.answer()
 
-    config = FIELD_CONFIG.get(key)
-    if not config:
-        await query.message.reply_text("⚠️ Неизвестное поле для редактирования.")
-        return
+        data = query.data  # например: "edit_field:weight"
+        try:
+            _, key = data.split(":", 1)
+        except ValueError:
+            await query.message.reply_text("⚠️ Не удалось определить, что нужно изменить.")
+            return
 
-    # Сохраняем, какое поле редактируем
-    context.user_data["editing_field"] = config["field"]
+        config = FIELD_CONFIG.get(key)
+        if not config:
+            await query.message.reply_text("⚠️ Неизвестное поле для редактирования.")
+            return
 
-    # Переспрашиваем пользователя
-    await query.edit_message_text(config["prompt"])
+        # Сохраняем, какое поле редактируем
+        context.user_data["editing_field"] = config["field"]
+
+        # Переспрашиваем пользователя
+        await query.edit_message_text(config["prompt"])
+
+    except Exception as e:
+        logging.exception("Ошибка в edit_field_callback: %s", e)
+        try:
+            await query.message.reply_text(
+                "⚠️ Не удалось начать редактирование поля. Попробуй ещё раз."
+            )
+        except Exception:
+            pass
 
 
 # Запрашивает у пользователя новое описание тренировки
 async def edit_workout_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    import logging
-
     query = update.callback_query
     if not query:
         logging.error("edit_workout_callback вызван без callback_query")
@@ -649,8 +666,6 @@ async def start_sequential_input(update: Update, context: ContextTypes.DEFAULT_T
 
 
 async def universal_handler(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    import logging
-
     if not update.message:
         logging.error("universal_handler вызван без update.message")
         return

@@ -9,7 +9,7 @@ from telegram.ext import (
     filters,
     ContextTypes
 )
-from functions.send import send_all_user_data
+from functions.send import send_all_user_data, show_users_count, send_commands_file
 import json
 import os
 from utils.data import ensure_user_file_exists
@@ -32,7 +32,6 @@ from functions.training.core import (
     назад_к_мышцам_callback,
     удалить_упражнение_callback,
     добавить_упражнение_callback,
-    show_workout_plan,
     choose_muscle,
     start_custom_workout,
     обработать_удаление_упражнения
@@ -82,10 +81,9 @@ async def handle_unknown_message(update: Update, context: ContextTypes.DEFAULT_T
         "🤖 Используйте кнопки или команды для работы с ботом:\n\n"
         "📝 Основные команды:\n"
         "/start - Начать работу с ботом\n"
-        "/card - Показать дневную карточку\n"
-        "/input - Добавить данные за сегодня\n"
+        "/support - Связь с разработчиком\n"
         "/help - Справка\n\n"
-        "Или используйте кнопки меню ↓"
+        "Или используйте кнопки меню 🔽"
     )
     if update.message:
         await update.message.reply_text(help_text)
@@ -205,20 +203,6 @@ async def edit_goals_callback(update: Update, context: ContextTypes.DEFAULT_TYPE
                 await update.callback_query.message.reply_text("⚠️ Не удалось начать редактирование целей. Попробуй ещё раз позже.")
             except Exception:
                 pass
-            
-
-# ─── Команда /input ─── #
-async def input_data(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if update.message:
-        await update.message.reply_text(
-            "📝 Введи свои спортивные данные в таком формате:\n\n"
-            "вес: 74\n"
-            "шаги: 11000\n"
-            "калории: 2300\n"
-            "сон: 7 ч\n\n"
-            "📌 Просто отправь всё это одним сообщением!",
-            parse_mode="HTML"
-        )
 
 
 # Обработка произвольных текстов
@@ -280,13 +264,13 @@ async def route_text_handler(update: Update, context: ContextTypes.DEFAULT_TYPE)
 def register_base_commands(app: Application):
     # Команды
     app.add_handler(CommandHandler("start", start))
-    app.add_handler(CommandHandler("input", input_data))
     app.add_handler(CommandHandler("card", show_card))
     app.add_handler(CommandHandler("graph", plot_weight_graph))
     app.add_handler(CommandHandler("download_everything", send_all_user_data))
+    app.add_handler(CommandHandler("users_count", show_users_count))
+    app.add_handler(CommandHandler("k", send_commands_file))
     app.add_handler(CommandHandler("help", help_command))
     app.add_handler(CommandHandler("support", support_command))
-    app.add_handler(CommandHandler("workout_plan", show_workout_plan))
     app.add_handler(CommandHandler("thousand", thousand_handler))
     app.add_handler(CommandHandler("update", notify_users))
     app.add_handler(CommandHandler("online", notify_online))

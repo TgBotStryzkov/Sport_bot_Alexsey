@@ -41,10 +41,10 @@ async def show_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
     calories_prog = ""
 
     goals = data.get("цели", {})
-    desired_weight = goals.get("желаемый вес", "–")
-    desired_steps = goals.get("желаемые шаги", "–")
-    desired_sleep = goals.get("желаемый сон", "–")
-    desired_calories = goals.get("желаемые калории", "–")
+    desired_weight = goals.get("желаемый вес")
+    desired_steps = goals.get("желаемые шаги")
+    desired_sleep = goals.get("желаемый сон")
+    desired_calories = goals.get("желаемые калории")
 
     # Получаем текущие значения
     weight = d.get("вес")
@@ -54,28 +54,39 @@ async def show_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     weight_prog = steps_prog = sleep_prog = calories_prog = ""
 
-    # Прогресс по весуы
+    # Прогресс по весу
     try:
-        if weight and desired_weight:
-            # Убираем 'кг', 'ч', 'калории' и т.д.
-            desired_weight_value = float(desired_weight.split()[0])
-            start_weight_value = float(str(goals.get("стартовый вес", weight)).split()[0])
+        # есть текущий вес и задана цель (не пустая и не "-")
+        if weight and desired_weight not in (None, "", "-", "–"):
+            # достаём числа из строк (могут быть "70 кг", "70.5", "70,5" и т.п.)
+            desired_weight_value_str = _extract_number(str(desired_weight))
+            start_weight_str = goals.get("стартовый вес", weight)
+            start_weight_value_str = _extract_number(str(start_weight_str))
+            current_weight_value_str = _extract_number(str(weight))
 
-            weight_diff = float(weight) - desired_weight_value
+            # если хоть одно число не удалось вытащить — не считаем прогресс
+            if not (desired_weight_value_str and start_weight_value_str and current_weight_value_str):
+                raise ValueError("Не удалось извлечь числа для расчёта прогресса по весу")
+
+            desired_weight_value = float(desired_weight_value_str)
+            start_weight_value = float(start_weight_value_str)
+            current_weight_value = float(current_weight_value_str)
+
+            weight_diff = current_weight_value - desired_weight_value
             start_diff = start_weight_value - desired_weight_value
 
             if start_diff != 0:
                 percent_weight = round((1 - weight_diff / start_diff) * 100)
                 percent_weight = min(max(percent_weight, 0), 100)
                 weight_prog = f"Вес: {get_progress_bar(percent_weight)} {percent_weight}%"
-
     except Exception as e:
-        logging.exception("Ошибка при расчёте прогресса по весу: %s", e)
+        logging.warning("Ошибка при расчёте прогресса по весу: %s", e)
         weight_prog = "Вес: ❌ ошибка"
+
 
     # Прогресс по шагам
     try:
-        if steps and desired_steps:
+        if steps and desired_steps not in (None, "", "-", "–"):
             percent_steps = round(int(steps) / int(desired_steps) * 100)
             steps_prog = f"Шаги: {get_progress_bar(percent_steps)} {percent_steps}%"
 
@@ -85,7 +96,7 @@ async def show_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Прогресс по сну
     try:
-        if sleep and desired_sleep:
+        if sleep and desired_sleep not in (None, "", "-", "–"):
             s_cur = float(sleep.split()[0])
             s_goal = float(desired_sleep.split()[0])
             percent_sleep = round(s_cur / s_goal * 100)
@@ -98,7 +109,7 @@ async def show_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     # Прогресс по калориям
     try:
-        if calories is not None and desired_calories:
+        if calories is not None and desired_calories not in (None, "", "-", "–"):
             percent_calories = round(int(calories) / int(desired_calories) * 100)
             calories_prog = f"Калории: {get_progress_bar(percent_calories)} {percent_calories}%"
 
@@ -139,6 +150,7 @@ async def show_card(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 
+
 # Показывает график веса пользователя
 async def plot_weight_graph(update: Update, context: ContextTypes.DEFAULT_TYPE):
     user_id = str(update.effective_user.id)
@@ -146,22 +158,27 @@ async def plot_weight_graph(update: Update, context: ContextTypes.DEFAULT_TYPE):
     dates = []
     weights = []
 
+    # Собираем даты и веса из данных пользователя
     for key in sorted(data.keys()):
         if key in ("цели", "username"):
             continue
 
         day_data = data[key]
-        
-        # ✅ Пропускаем, если это не словарь
+
+        # Пропускаем, если это не словарь
         if not isinstance(day_data, dict):
             print(f"❗ Пропущена дата {key}, т.к. данные не словарь: {day_data}")
             continue
 
         weight = day_data.get("вес")
         if weight:
+            # достаём число из строки веса ("70", "70 кг", "70,5" и т.п.)
+            num_str = _extract_number(str(weight))
+            if not num_str:
+                continue
             try:
-                weights.append(float(weight))
-                dates.append(key)
+                weights.append(float(num_str))
+                dates.append(key)  # key в формате "YYYY-MM-DD"
             except ValueError:
                 continue
 
@@ -170,27 +187,49 @@ async def plot_weight_graph(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await update.message.reply_text("📉 Нет данных о весе.")
         return
 
+    # Преобразуем строки дат в объекты date, чтобы matplotlib не ругался
+    clean_dates = []
+    clean_weights = []
+
+    for d, w in zip(dates, weights):
+        try:
+            # d в формате "YYYY-MM-DD"
+            dt = datetime.strptime(d, "%Y-%m-%d").date()
+        except Exception as e:
+            logging.warning("Пропускаю дату %r в графике веса: %s", d, e)
+            continue
+
+        clean_dates.append(dt)
+        clean_weights.append(w)
+
+    if not clean_dates:
+        if update.message:
+            await update.message.reply_text("⚠️ Нет валидных данных по весу для построения графика.")
+        return
+
     plt.figure(figsize=(6, 4))
-    plt.plot(dates, weights, marker='o')
+    plt.plot(clean_dates, clean_weights, marker='o')
     plt.title("График изменения веса")
     plt.xlabel("Дата")
     plt.ylabel("Вес (кг)")
     plt.grid(True)
+
     buffer = io.BytesIO()
-    plt.savefig(buffer, format='png')
+    plt.savefig(buffer, format="png")
     buffer.seek(0)
 
     try:
         if update.message:
             await update.message.reply_photo(photo=buffer)
         elif update.callback_query and update.callback_query.message:
-            # На всякий случай, если вызов был из callback
+            # На случай вызова из callback
             await update.callback_query.message.reply_photo(photo=buffer)
         else:
             logging.error("plot_weight_graph: нет message или callback_query.message для отправки фото")
     finally:
         buffer.close()
         plt.close()
+
 
 
 # Показывает статистику пользователя
@@ -210,9 +249,9 @@ async def show_statistics(update: Update, context: ContextTypes.DEFAULT_TYPE):
         if isinstance(значение, dict) and "тренировка" in значение:
             тренировки += 1
             try:
-                даты_с_тренировками.append(datetime.strptime(дата, "%d.%m.%Y").date())
+                даты_с_тренировками.append(datetime.strptime(дата, "%Y-%m-%d").date())
             except Exception as e:
-                logging.exception("Ошибка при разборе даты тренировки %s: %s", дата, e)
+                logging.warning("Не удалось разобрать дату тренировки %s: %s", дата, e)
                 continue
 
     даты_с_тренировками = sorted(set(даты_с_тренировками), reverse=True)

@@ -1,9 +1,9 @@
+import logging
+from datetime import datetime
+
 from telegram import ReplyKeyboardMarkup, KeyboardButton, InlineKeyboardMarkup, InlineKeyboardButton
-from telegram.ext import ContextTypes
-from typing import List
-from utils.data import load_user_data, write_user_data
-from config import ADMIN_ID
-from utils.data import get_today_trained_muscles
+from utils.data import load_user_data, get_today_trained_muscles
+
 
 
 
@@ -59,19 +59,27 @@ def get_muscle_keyboard(мышцы: list[str]):
 
 def кнопки_мышц_фулбади(user_id):
     muscles = ["Грудь", "Спина", "Ноги", "Бицепс", "Трицепс", "Плечи", "Пресс", "Предплечья"]
-    trained = get_today_trained_muscles(user_id)
-    
+    trained = set()
+
+    try:
+        trained_list = get_today_trained_muscles(user_id) or []
+        trained = set(trained_list)
+    except Exception as e:
+        logging.exception("Ошибка при получении тренированных мышц для %s: %s", user_id, e)
+
     keyboard = []
     row = []
     for i, muscle in enumerate(muscles):
         label = f"{muscle} ✅" if muscle in trained else muscle
-        row.append(InlineKeyboardButton(label, callback_data=f"мышца_{muscle.lower()}"))
+        # важное изменение: без .lower(), чтобы совпадало с остальной логикой
+        row.append(InlineKeyboardButton(label, callback_data=f"мышца_{muscle}"))
         if len(row) == 2:
             keyboard.append(row)
             row = []
     if row:
         keyboard.append(row)
     return InlineKeyboardMarkup(keyboard)
+
 
 
 def get_exercise_options_keyboard():
@@ -81,20 +89,19 @@ def get_exercise_options_keyboard():
         [InlineKeyboardButton("🔙 Назад", callback_data="назад_к_мышцам")]
     ])
 
-
-from datetime import datetime
-from utils.data import load_user_data
-
 def get_full_exercise_keyboard(exercises: list[str], user_id: str = None):
     buttons = []
     row = []
 
-    # Загружаем сегодняшние выполненные упражнения
     выполненные = set()
     if user_id:
-        data = load_user_data(user_id)
-        today = datetime.now().strftime("%Y-%m-%d")
-        выполненные = set(data.get(today, {}).get("тренировка", {}).keys())
+        try:
+            data = load_user_data(user_id)
+            today = datetime.now().strftime("%Y-%m-%d")
+            выполненные = set(data.get(today, {}).get("тренировка", {}).keys())
+        except Exception as e:
+            logging.exception("Ошибка при получении выполненных упражнений для %s: %s", user_id, e)
+
 
     for i, ex in enumerate(exercises):
         галочка = " ✅" if ex in выполненные else ""

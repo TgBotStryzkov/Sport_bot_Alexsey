@@ -95,7 +95,7 @@ def main():
             register_notify_handlers(app)
             register_training_handlers(app)
 
-            print("✅ Бот запущен")
+            print("✅ Бот запущен 999")
             app.run_polling(close_loop=False)
 
             # Если polling завершился без исключения (ты сам его остановил) — выходим из цикла

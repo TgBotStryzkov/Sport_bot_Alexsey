@@ -107,21 +107,13 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         with open(user_file, "w", encoding="utf-8") as f:
             json.dump({"id": user_id}, f, ensure_ascii=False, indent=2)
 
-
     if "цели" not in data or not data["цели"]:
-        context.user_data["awaiting_goals"] = True
+        # Если целей ещё нет — запускаем мастер пошагового ввода
         if update.message:
-            await update.message.reply_text(
-                "🎯 Введи свои цели (один раз):\n"
-                "Скопируй всё это сообщение, измени числа и отправь боту\n\n"
-                "желаемый вес: 70\n"
-                "желаемые шаги: 12000\n"
-                "желаемый сон: 8 ч\n"
-                "желаемые калории: 2500\n"
-                "стартовый вес: 75\n\n"
-                "📌 Отправь всё это одним сообщением!"
-            )
+            # 👉 ВАЖНО: передаём именно update.message, а не весь update
+            await start_goals_edit(update.message, context)
         return
+    
     keyboard = [
         [KeyboardButton("📝 Добавить данные за сегодня"), KeyboardButton("📊 Цели и прогресс")],
         [KeyboardButton("📈 График изменения веса"), KeyboardButton("🏋️ История тренировок")],

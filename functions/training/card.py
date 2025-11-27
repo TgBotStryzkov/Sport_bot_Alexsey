@@ -318,23 +318,41 @@ async def show_statistics(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
 # ---------------- Работа с целями (мастер) ----------------
 
-async def start_goals_edit(query, context):
-    """Запускает пошаговый ввод целей."""
+from telegram import CallbackQuery, Message
+import logging
+from utils.data import load_user_data
 
-    if not query or not query.message:
-        logging.error("start_goals_edit вызван без query или query.message")
+
+async def start_goals_edit(source, context):
+    """Запускает пошаговый ввод целей (и с кнопки, и из /start)."""
+
+    # 1️⃣ Определяем, что нам пришло: CallbackQuery или Message
+    if isinstance(source, CallbackQuery):
+        query = source
+        user = query.from_user
+        message = query.message
+
+        # убираем "часики" на кнопке
+        try:
+            await query.answer()
+        except Exception:
+            pass
+
+    elif isinstance(source, Message):
+        user = source.from_user
+        message = source
+
+    else:
+        logging.error("start_goals_edit вызван с неподдерживаемым типом: %s", type(source))
         return
-    
-    user_id = str(query.from_user.id)
+
+    # 2️⃣ Грузим данные пользователя
+    user_id = str(user.id)
     data = load_user_data(user_id)
     goals = data.get("цели", {})
 
     try:
-        if not query or not query.message:
-            logging.error("start_goals_edit вызван без query или query.message")
-            return
-
-        # Сохраняем текущие цели как временные
+        # Сохраняем текущие цели как временные в user_data
         context.user_data["goals_state"] = True
         context.user_data["goals_step"] = 1
         context.user_data["goals_tmp"] = {
@@ -352,16 +370,17 @@ async def start_goals_edit(query, context):
             "1/5. Введи желаемый вес в кг.\n"
             f"Сейчас: {goals.get('желаемый вес', 'не задано')}"
         )
-        await query.message.reply_text(text)
+        await message.reply_text(text)
 
     except Exception as e:
         logging.exception("Ошибка в start_goals_edit: %s", e)
         try:
-            await query.message.reply_text(
+            await message.reply_text(
                 "⚠️ Не удалось запустить изменение целей. Попробуй ещё раз позже."
             )
         except Exception:
             pass
+
 
 
 def _extract_number(text: str):

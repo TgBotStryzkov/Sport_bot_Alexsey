@@ -8,8 +8,6 @@ import io
 import re
 from utils.data import load_user_data, write_user_data, get_progress_bar, разобрать_результат
 import logging
-from functions.base import get_main_menu_keyboard
-
 
 
 
@@ -500,6 +498,7 @@ async def handle_goals_input(update, context):
             context.user_data.pop("goals_tmp", None)
 
             # 👉 Вот тут отправляем сообщение + показываем главное меню
+            from functions.base import get_main_menu_keyboard
             await update.message.reply_text(
                 "✅ Цели сохранены! Можешь снова открыть карточку, чтобы посмотреть прогресс.",
                 reply_markup=get_main_menu_keyboard(),

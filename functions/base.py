@@ -170,7 +170,7 @@ async def support_command(update: Update, context: ContextTypes.DEFAULT_TYPE):
         )
 
 async def edit_goals_callback(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Запуск мастера изменения целей по кнопке '🎯 Цели'."""
+    """Запуск мастера изменения целей по кнопке 'Изменить цели 🎯'."""
     import logging
     try:
         if not update.callback_query:

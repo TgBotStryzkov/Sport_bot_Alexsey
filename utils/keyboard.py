@@ -27,7 +27,7 @@ def get_edit_card_keyboard():
             InlineKeyboardButton("🔥 Калории", callback_data="edit_field:calories")
         ],
         [
-            InlineKeyboardButton("🎯 Цели", callback_data="edit_goals") 
+            InlineKeyboardButton("Изменить цели🎯", callback_data="edit_goals") 
         ]
     ]
     return InlineKeyboardMarkup(keyboard)

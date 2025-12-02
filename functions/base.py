@@ -125,7 +125,7 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if update.message:
         await update.message.reply_text(
             "Привет! Я твой спортивный бот 💪\n"
-            "Выбери действие ниже дрыщ:",
+            "Выбери действие ниже, додик:",
             reply_markup=reply_markup
         )
 

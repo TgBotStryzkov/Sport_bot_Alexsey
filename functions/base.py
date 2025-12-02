@@ -88,6 +88,21 @@ async def handle_unknown_message(update: Update, context: ContextTypes.DEFAULT_T
     if update.message:
         await update.message.reply_text(help_text)
 
+
+# ─── Главное меню ─── #
+def get_main_menu_keyboard() -> ReplyKeyboardMarkup:
+    keyboard = [
+        [KeyboardButton("📝 Добавить данные за сегодня"), KeyboardButton("📊 Цели и прогресс")],
+        [KeyboardButton("📈 График изменения веса"), KeyboardButton("🏋️ История тренировок")],
+        [KeyboardButton("📅 Серия и рекорды"), KeyboardButton("🏁 Начать новую тренировку")]
+    ]
+    return ReplyKeyboardMarkup(
+        keyboard,
+        resize_keyboard=True,
+        one_time_keyboard=False
+    )
+
+
 # ─── Команда /start ─── #
 async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
@@ -110,24 +125,16 @@ async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if "цели" not in data or not data["цели"]:
         # Если целей ещё нет — запускаем мастер пошагового ввода
         if update.message:
-            # 👉 ВАЖНО: передаём именно update.message, а не весь update
             await start_goals_edit(update.message, context)
         return
     
-    keyboard = [
-        [KeyboardButton("📝 Добавить данные за сегодня"), KeyboardButton("📊 Цели и прогресс")],
-        [KeyboardButton("📈 График изменения веса"), KeyboardButton("🏋️ История тренировок")],
-        [KeyboardButton("📅 Серия и рекорды"), KeyboardButton("🏁 Начать новую тренировку")]
-    ]
-    reply_markup = ReplyKeyboardMarkup(
-        keyboard, resize_keyboard=True, one_time_keyboard=False
-    )
     if update.message:
         await update.message.reply_text(
             "Привет! Я твой спортивный бот 💪\n"
             "Выбери действие ниже, воин:",
-            reply_markup=reply_markup
+            reply_markup=get_main_menu_keyboard(),
         )
+
 
 #Хендлер для получения file_id гифки
 async def get_file_id(update: Update, context: ContextTypes.DEFAULT_TYPE):
